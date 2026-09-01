@@ -1,0 +1,100 @@
+schemaVersion: "2"
+kind: mixin
+name: clickhouse
+displayName: ClickHouse (remote connector)
+description: "Connects an agent to a remote ClickHouse warehouse (ClickHouse Cloud or self-hosted) via the official ClickHouse MCP server. Queries run over the HTTP interface so the password is injected by the sbx proxy and never lives inside the container. Edit the CLICKHOUSE_* values below for your warehouse; set the password with: sbx secret set -g clickhouse."
+
+# ---------------------------------------------------------------------------
+# EDIT THESE for your warehouse. Everything here is NON-SECRET config.
+# The only secret — the password — is delivered through `credentials` below
+# and is never written in this file.
+#
+#   CLICKHOUSE_HOST     your HTTP(S) host, no scheme/port
+#                       (Cloud looks like <id>.<region>.<cloud>.clickhouse.cloud)
+#   CLICKHOUSE_PORT     8443 = Cloud HTTPS · 8123 = plain HTTP
+#   CLICKHOUSE_USER     must match the `username` under credentials.inject below
+#   CLICKHOUSE_SECURE   "true" for TLS/Cloud, "false" for plain HTTP
+#
+# IMPORTANT: keep CLICKHOUSE_HOST in sync with the `domain:` under credentials
+# and permissions.network.allow, and keep CLICKHOUSE_USER in sync with the
+# inject `username:` — they are plain literals in this v0.39.0 grammar.
+# ---------------------------------------------------------------------------
+environment:
+  variables:
+    CLICKHOUSE_HOST: "CHANGE_ME.clickhouse.cloud"
+    CLICKHOUSE_PORT: "8443"
+    CLICKHOUSE_USER: "default"
+    CLICKHOUSE_DATABASE: "default"
+    CLICKHOUSE_SECURE: "true"
+    # The proxy terminates TLS with its own CA, which clickhouse-connect's
+    # bundled certifi store does not trust. The proxy still verifies TLS to the
+    # real warehouse, so the warehouse-facing hop stays protected. See README.
+    CLICKHOUSE_VERIFY: "false"
+    # Sentinel: the proxy swaps this for the real password on outbound Basic
+    # auth to CLICKHOUSE_HOST. The container never sees the real value.
+    CLICKHOUSE_PASSWORD: "proxy-managed"
+
+# The password. clickhouse-connect sends `Authorization: Basic
+# base64(user:password)`; `scheme: basic` tells the proxy to reconstruct that
+# header with the real secret for the allow-listed host.
+credentials:
+  - service: clickhouse
+    description: "ClickHouse password (set it with: sbx secret set -g clickhouse)"
+    apiKey:
+      name: CLICKHOUSE_PASSWORD
+      inject:
+        - domain: "CHANGE_ME.clickhouse.cloud"    # == CLICKHOUSE_HOST
+          scheme: basic
+          username: "default"                      # == CLICKHOUSE_USER
+
+# Every inject domain MUST appear here, plus the PyPI domains the MCP server is
+# installed from.
+permissions:
+  network:
+    allow:
+      - "CHANGE_ME.clickhouse.cloud"               # runtime: the warehouse
+      - pypi.org                                   # install: mcp-clickhouse
+      - files.pythonhosted.org
+
+setup:
+  install:
+    - command: "pip install --break-system-packages 'mcp-clickhouse'"
+      user: "1000"
+      description: "Install the official ClickHouse MCP server (clickhouse-connect over the HTTP interface)"
+  startup:
+    # Register the MCP server with Claude Code if present. Guarded + `|| true`
+    # so it is a no-op on other agents and idempotent across restarts (a repeat
+    # `mcp add` simply fails and is swallowed).
+    - command: ["sh", "-c", "command -v claude >/dev/null 2>&1 && claude mcp add clickhouse -- /home/agent/.local/bin/mcp-clickhouse >/dev/null 2>&1 || true"]
+      user: "1000"
+      description: "Register the ClickHouse MCP server with the Claude agent (best-effort; no-op elsewhere)"
+  files:
+    # Portable server definition — copy into any agent that reads an mcpServers
+    # block. Written under $HOME so it never overlays the user's repo.
+    - path: /home/agent/.clickhouse/mcp.json
+      onlyIfMissing: true
+      content: |
+        {
+          "mcpServers": {
+            "clickhouse": {
+              "command": "/home/agent/.local/bin/mcp-clickhouse",
+              "args": []
+            }
+          }
+        }
+
+agentInstructions:
+  content: |
+    ClickHouse remote warehouse: the official ClickHouse MCP server is installed
+    and registered as `clickhouse`. It connects over the HTTP interface to
+    CLICKHOUSE_HOST; the password is injected by the sbx proxy on requests to
+    that host, so it never appears in this container.
+
+    Use the MCP tools to explore and query the warehouse:
+      - list databases and tables
+      - inspect table schemas
+      - run read (SELECT) queries — the server runs them read-only
+
+    The native protocol (clickhouse-client on port 9000/9440) is NOT wired up:
+    its auth cannot be proxy-injected. Query over HTTP via the MCP tools (or
+    `curl` to the HTTP interface, which the proxy also injects).

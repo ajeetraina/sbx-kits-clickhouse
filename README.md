@@ -62,10 +62,11 @@ bindings:
 
 ## Usage
 
-Published OCI artifact (available once this kit is published):
+Published OCI artifact on Docker Hub:
 
 ```bash
-sbx run claude --kit docker.io/sbx/clickhouse-kit:latest .
+sbx secret set -g clickhouse        # store the password once
+sbx run claude --kit docker.io/ajeetraina777/sbx-clickhouse-kits:latest .
 ```
 
 From a pinned git ref:

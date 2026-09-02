@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="640" viewBox="0 0 1180 640" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8a94a6"/>
+    </marker>
+    <marker id="arrowDash" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9aa3af"/>
+    </marker>
+  </defs>
+
+  <rect width="1180" height="640" fill="#ffffff"/>
+
+  <!-- title -->
+  <text x="28" y="30" fill="#1f2937" font-size="20" font-weight="700">ClickHouse mixin — the password never enters the sandbox</text>
+
+  <!-- Host machine -->
+  <rect x="28" y="52" width="945" height="540" rx="26" fill="#e9f1fc" stroke="#7aa7e0" stroke-width="2.5"/>
+  <text x="62" y="566" fill="#1e4fa3" font-size="21" font-weight="700">Host machine</text>
+
+  <!-- Workspace directories -->
+  <rect x="66" y="250" width="152" height="82" rx="9" fill="#ffffff" stroke="#cfd6df" stroke-width="1.5"/>
+  <text x="142" y="284" text-anchor="middle" fill="#1f2937" font-size="16" font-weight="700">Workspace</text>
+  <text x="142" y="306" text-anchor="middle" fill="#1f2937" font-size="16" font-weight="700">directories</text>
+  <line x1="218" y1="291" x2="272" y2="291" stroke="#8a94a6" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- microVM sandbox -->
+  <rect x="278" y="130" width="262" height="322" rx="13" fill="#ffffff" stroke="#6b7787" stroke-width="2"/>
+  <text x="298" y="162" fill="#1f2937" font-size="18" font-weight="700">microVM sandbox</text>
+  <text x="522" y="162" text-anchor="end" fill="#8a94a6" font-size="13">container</text>
+
+  <!-- container dashed box -->
+  <rect x="298" y="178" width="222" height="256" rx="9" fill="none" stroke="#9aa3af" stroke-width="1.5" stroke-dasharray="5 4"/>
+
+  <!-- Agent / Claude -->
+  <rect x="314" y="194" width="190" height="56" rx="7" fill="#ffffff" stroke="#cfd6df" stroke-width="1.5"/>
+  <text x="409" y="228" text-anchor="middle" fill="#2f6fdb" font-size="16" font-weight="700">Agent / Claude</text>
+
+  <!-- clickhouse mixin -->
+  <rect x="314" y="266" width="190" height="86" rx="7" fill="#ffffff" stroke="#cfd6df" stroke-width="1.5"/>
+  <text x="409" y="292" text-anchor="middle" fill="#2f6fdb" font-size="16" font-weight="700">clickhouse</text>
+  <text x="409" y="312" text-anchor="middle" fill="#6b7280" font-size="11.5">ClickHouse MCP server</text>
+  <text x="409" y="329" text-anchor="middle" fill="#6b7280" font-size="11.5">HTTP interface · kind: mixin</text>
+
+  <!-- CLICKHOUSE_PASSWORD sentinel -->
+  <rect x="298" y="360" width="222" height="60" rx="9" fill="#ece7dd" stroke="#d8cfc0" stroke-width="1.5"/>
+  <text x="409" y="386" text-anchor="middle" fill="#6b6255" font-size="13.5" font-weight="600" font-family="'SF Mono', Menlo, monospace">CLICKHOUSE_PASSWORD</text>
+  <text x="409" y="406" text-anchor="middle" fill="#8a8272" font-size="13">= proxy-managed</text>
+
+  <!-- sandbox -> proxy -->
+  <line x1="540" y1="295" x2="596" y2="295" stroke="#8a94a6" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="568" y="286" text-anchor="middle" fill="#6b7280" font-size="11">Basic</text>
+
+  <!-- Secret store -->
+  <rect x="596" y="158" width="182" height="74" rx="9" fill="#ffffff" stroke="#cfd6df" stroke-width="1.5"/>
+  <text x="687" y="188" text-anchor="middle" fill="#1f2937" font-size="16" font-weight="700">Secret store</text>
+  <text x="687" y="210" text-anchor="middle" fill="#6b7280" font-size="12">sbx secret set -g</text>
+  <text x="687" y="226" text-anchor="middle" fill="#6b7280" font-size="12">clickhouse</text>
+  <line x1="687" y1="232" x2="687" y2="268" stroke="#8a94a6" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- sbx proxy -->
+  <rect x="596" y="270" width="182" height="80" rx="9" fill="#d9f2e4" stroke="#86d6ab" stroke-width="2"/>
+  <text x="687" y="302" text-anchor="middle" fill="#1f9d63" font-size="17" font-weight="700">sbx proxy</text>
+  <text x="687" y="324" text-anchor="middle" fill="#1f9d63" font-size="13">injects password into</text>
+  <text x="687" y="341" text-anchor="middle" fill="#1f9d63" font-size="13">the Basic auth header</text>
+
+  <!-- Egress policy -->
+  <rect x="596" y="372" width="182" height="74" rx="9" fill="#ffffff" stroke="#cfd6df" stroke-width="1.5"/>
+  <text x="687" y="402" text-anchor="middle" fill="#1f2937" font-size="16" font-weight="700">Egress policy</text>
+  <text x="687" y="424" text-anchor="middle" fill="#6b7280" font-size="12.5">allow-list · your host only</text>
+
+  <!-- proxy -> ClickHouse (crosses host boundary) -->
+  <path d="M778 302 C 900 292, 930 250, 992 236" fill="none" stroke="#9aa3af" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#arrowDash)"/>
+  <!-- egress -> registries -->
+  <path d="M778 410 C 900 415, 930 410, 992 402" fill="none" stroke="#9aa3af" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#arrowDash)"/>
+
+  <!-- ClickHouse (external) -->
+  <rect x="992" y="200" width="176" height="80" rx="9" fill="#ffffff" stroke="#cfd6df" stroke-width="1.5"/>
+  <text x="1080" y="230" text-anchor="middle" fill="#1f2937" font-size="16" font-weight="700">ClickHouse</text>
+  <text x="1080" y="251" text-anchor="middle" fill="#6b7280" font-size="12">Cloud / self-hosted</text>
+  <text x="1080" y="268" text-anchor="middle" fill="#6b7280" font-size="12">HTTPS :8443</text>
+
+  <!-- Registries (external) -->
+  <rect x="992" y="366" width="176" height="74" rx="9" fill="#ffffff" stroke="#cfd6df" stroke-width="1.5"/>
+  <text x="1080" y="398" text-anchor="middle" fill="#1f2937" font-size="15" font-weight="700">PyPI</text>
+  <text x="1080" y="420" text-anchor="middle" fill="#6b7280" font-size="12.5">install-time only</text>
+
+  <!-- caption -->
+  <text x="992" y="470" fill="#1e4fa3" font-size="16" font-weight="700">The password never</text>
+  <text x="992" y="492" fill="#1e4fa3" font-size="16" font-weight="700">enters the sandbox</text>
+  <text x="992" y="520" fill="#3b7fd6" font-size="13.5">Proxy swaps the sentinel</text>
+  <text x="992" y="539" fill="#3b7fd6" font-size="13.5">for the real password at</text>
+  <text x="992" y="558" fill="#3b7fd6" font-size="13.5">the network boundary</text>
+</svg>

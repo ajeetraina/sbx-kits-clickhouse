@@ -1,25 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Publishes the ClickHouse mixin as an OCI kit artifact to Docker Hub, matching
-# the sbx-kits convention: docker.io/<namespace>/sbx-clickhouse-kits:<tag>.
+# push-kits.sh — validate and publish the ClickHouse kit to Docker Hub as an OCI
+# artifact, the same way the sbx partner kits are published (`sbx kit push`).
 #
-# This kit is a single mixin (spec.yaml + README at the repo root), so there are
-# no per-provider tags — just one artifact. Staging into a temp dir keeps the
-# pushed kit to spec.yaml + README + LICENSE, nothing else from the repo.
+# Target namespace defaults to `sbx` (hub.docker.com/u/sbx). Override for testing
+# in your own namespace:
+#   DOCKERHUB_NAMESPACE=<you> TAG=dev bash scripts/push-kits.sh
+#
+# Consumers then run:
+#   sbx run claude --kit docker.io/<namespace>/clickhouse-kit:<tag> .
 
 namespace="${DOCKERHUB_NAMESPACE:-${DOCKER_NAMESPACE:-ajeetraina777}}"
 tag="${TAG:-latest}"
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-image="docker.io/$namespace/sbx-clickhouse-kits"
+image="docker.io/$namespace/clickhouse-kit"
 
-stage="$(mktemp -d /tmp/clickhouse-kit-push.XXXXXX)"
-mkdir -p "$stage/clickhouse"
-cp "$repo_root/spec.yaml" "$stage/clickhouse/spec.yaml"
-cp "$repo_root/README.md" "$stage/clickhouse/README.md"
-cp "$repo_root/LICENSE"   "$stage/clickhouse/LICENSE"
+# publish SPEC_DIR IMAGE_TAG README_FILE
+# Stages the kit (spec.yaml + README + LICENSE), validates it, and pushes one tag.
+publish() {
+  local spec_dir="$1" image_tag="$2" readme="$3"
+  local stage
+  stage="$(mktemp -d /tmp/clickhouse-kit-push.XXXXXX)"
+  mkdir -p "$stage/clickhouse"
+  cp "$spec_dir/spec.yaml" "$stage/clickhouse/spec.yaml"
+  cp "$readme"             "$stage/clickhouse/README.md"
+  cp "$repo_root/LICENSE"  "$stage/clickhouse/LICENSE"
+  sbx kit validate "$stage/clickhouse"
+  sbx kit push     "$stage/clickhouse" "$image:$image_tag"
+  rm -rf "$stage"
+  echo "Pushed $image:$image_tag"
+}
 
-sbx kit validate "$stage/clickhouse"
-sbx kit push "$stage/clickhouse" "$image:$tag"
-rm -rf "$stage"
-echo "Pushed $image:$tag"
+# Single kind: mixin kit at the repo root -> :$tag (default :latest).
+publish "$repo_root" "$tag" "$repo_root/README.md"

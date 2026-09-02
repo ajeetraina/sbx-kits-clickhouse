@@ -1,10 +1,22 @@
-name: Publish Kits
+name: Publish Kit
 
 on:
+  # Auto-publish whenever kit content lands on main, so Docker Hub always tracks
+  # the default branch. Path-filtered so unrelated changes (assets, LICENSE-only)
+  # don't trigger a republish.
+  push:
+    branches: [main]
+    paths:
+      - "spec.yaml"
+      - "files/**"
+      - "scripts/push-kits.sh"
+      - "README.md"
+      - "DOCKERHUB.md"
+      - ".github/workflows/push-kits.yaml"
   workflow_dispatch:
     inputs:
       sbx_release:
-        description: "docker/sbx-releases tag to install"
+        description: "docker/sbx-releases tag to install (must support schemaVersion 2 kits)"
         required: true
         default: "v0.39.0"
       tag:
@@ -22,7 +34,7 @@ jobs:
       - name: Install SBX
         env:
           GH_TOKEN: ${{ github.token }}
-          SBX_RELEASE: ${{ inputs.sbx_release }}
+          SBX_RELEASE: ${{ inputs.sbx_release || 'v0.39.0' }}
         run: |
           set -euo pipefail
           gh release download "$SBX_RELEASE" \
@@ -32,24 +44,51 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y /tmp/docker-sandboxes.deb
           sbx version
+          # sbx login (below) stores its account profile via the daemon, so it
+          # must be running. --detach keeps it from blocking the step.
+          sbx daemon start --detach
+          for _ in $(seq 1 30); do
+            sbx daemon status 2>/dev/null | grep -q 'running' && break
+            sleep 1
+          done
+          sbx daemon status
 
       - name: Log in to Docker Hub
+        # Populates the Docker credential store — used for the kit's OCI layer
+        # push (`sbx kit push` reads the Docker credential store).
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Authenticate sbx to Docker Hub
+        # `sbx kit push` also writes an OCI provenance blob, authenticated via
+        # sbx's OWN account profile (from `sbx login`), NOT the Docker credential
+        # store. Without this the layer push succeeds but provenance fails with
+        # "no default account profile set".
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: printf '%s' "$DOCKERHUB_TOKEN" | sbx login --username "$DOCKERHUB_USERNAME" --password-stdin
+
       - name: Publish kit artifact
         env:
           DOCKERHUB_NAMESPACE: ${{ secrets.DOCKERHUB_USERNAME }}
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ inputs.tag || 'latest' }}
         run: bash ./scripts/push-kits.sh
 
       - name: Sync Docker Hub overview page
+        # Cosmetic: updates the Hub repo's overview README from DOCKERHUB.md.
+        # `if: always()` decouples it from the push; `continue-on-error` keeps a
+        # DOCKERHUB_TOKEN whose scope doesn't include this repo from failing the
+        # run. Use a PAT scoped to <namespace>/clickhouse-kit with read/write to
+        # make it actually update.
+        if: ${{ always() }}
+        continue-on-error: true
         uses: peter-evans/dockerhub-description@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: ${{ secrets.DOCKERHUB_USERNAME }}/sbx-clickhouse-kits
+          repository: ${{ secrets.DOCKERHUB_USERNAME }}/clickhouse-kit
           readme-filepath: ./DOCKERHUB.md
-          short-description: "Docker Sandboxes mixin connecting an agent to a remote ClickHouse warehouse via the official ClickHouse MCP server"
+          short-description: "Docker Sandboxes mixin: connect an agent to a remote ClickHouse warehouse via the ClickHouse MCP server; password stays proxy-managed"

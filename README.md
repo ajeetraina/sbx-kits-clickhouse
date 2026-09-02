@@ -4,14 +4,16 @@ Connects an agent's Docker Sandbox to a **remote ClickHouse** warehouse
 (ClickHouse Cloud or self-hosted) through the official
 [ClickHouse MCP server](https://github.com/ClickHouse/mcp-clickhouse). The agent
 gets structured tools to list databases/tables and run read queries against your
-real warehouse, inside an isolated microVM, under a `deny-all` network policy,
+real warehouse — inside an isolated microVM, under a `deny-all` network policy,
 with the password injected by the sbx proxy so it **never enters the container**.
+
+![Architecture](assets/architecture.svg)
 
 ## Why this is a good fit for sbx
 
 ClickHouse is most useful pointed at real data, and that's exactly where the
 sandbox model pays off: the agent can explore your warehouse while (a) it can
-only reach the one host you allow-list, and (b) it never sees the password,  the
+only reach the one host you allow-list, and (b) it never sees the password — the
 proxy holds it and injects it on the wire.
 
 ## How the credential stays out of the container
@@ -23,15 +25,23 @@ proxy holds it and injects it on the wire.
    sentinel for your real password on the outbound request.
 
 The ClickHouse **native** protocol (port 9000/9440) is raw TCP and cannot be
-injected this way so this kit drives ClickHouse over the **HTTP interface**
+injected this way — so this kit drives ClickHouse over the **HTTP interface**
 (8443 for Cloud, 8123 for plain HTTP).
 
 ## Configure
 
-**1. Edit the connection config** in [`spec.yaml`](./spec.yaml). These are all
-non-secret. Keep the three copies of the host in sync (`CLICKHOUSE_HOST`, the
-credential `domain:`, and `permissions.network.allow`), and keep `CLICKHOUSE_USER`
-in sync with the inject `username:`.
+**1. Set the connection target** with the helper — it rewrites every place the
+value must match (the host lives in **3** spots, the user in **2**) and
+re-validates, so nothing can drift:
+
+```bash
+scripts/set-host.sh <your-host>.clickhouse.cloud
+# with options:
+scripts/set-host.sh ch.internal.example.com --user analyst --port 8123 --secure false
+```
+
+These are all non-secret values (defaults shown); the helper edits them in
+[`spec.yaml`](./spec.yaml):
 
 | value | default | meaning |
 |-------|---------|---------|
@@ -40,6 +50,11 @@ in sync with the inject `username:`.
 | `CLICKHOUSE_USER` | `default` | ClickHouse username |
 | `CLICKHOUSE_DATABASE` | `default` | default database |
 | `CLICKHOUSE_SECURE` | `true` | `true` for TLS/Cloud, `false` for plain HTTP |
+
+> In this v0.39.0 grammar there's no `args` templating, so these are plain
+> literals that must stay in sync — `set-host.sh` is the single source of truth
+> so they can't diverge (a drift the validator won't catch but the engine
+> rejects at run time).
 
 **2. Set the password** (never stored in the kit):
 
@@ -62,33 +77,32 @@ bindings:
 
 ## Usage
 
-Published OCI artifact on Docker Hub:
+Published OCI artifact:
 
 ```bash
-sbx secret set -g clickhouse        # store the password once
-sbx run claude --kit docker.io/ajeetraina777/sbx-clickhouse-kits:latest .
+sbx run claude --kit docker.io/ajeetraina777/clickhouse-kit:latest .
 ```
 
 From a pinned git ref:
 
 ```bash
-sbx run claude --kit "git+https://github.com/<you>/sbx-kits-clickhouse.git#ref=<40-hex-sha>&dir=clickhouse" .
+sbx run claude --kit "git+https://github.com/ajeetraina/sbx-kits-clickhouse.git#ref=<40-hex-sha>" .
 ```
 
 Local path (while authoring):
 
 ```bash
-sbx run claude --kit ./clickhouse/ .
+sbx run claude --kit . .
 ```
 
 ## Verify
 
 ```bash
-sbx kit validate ./clickhouse/
-sbx kit inspect  ./clickhouse/                 # confirm host resolved into inject + allow
+sbx kit validate .
+sbx kit inspect  .                             # confirm host resolved into inject + allow
 
 # End to end
-sbx run claude --kit ./clickhouse/ --name ch-probe .
+sbx run claude --kit . --name ch-probe .
 sbx exec ch-probe -- /home/agent/.local/bin/mcp-clickhouse --help   # server installed?
 sbx exec ch-probe -- claude mcp list                                # registered?
 # then ask the agent: "list the ClickHouse databases"
@@ -112,4 +126,19 @@ sbx rm ch-probe
 - **Claude-oriented.** The startup hook registers the MCP server via
   `claude mcp add`; on non-Claude agents it's a no-op — copy
   `~/.clickhouse/mcp.json` into that agent's MCP config instead.
+
+## Publishing
+
+This repo publishes the kit to Docker Hub as an OCI artifact via
+[`scripts/push-kits.sh`](scripts/push-kits.sh) (and the
+[`Publish Kit`](.github/workflows/push-kits.yaml) workflow on push to `main`):
+
+```bash
+DOCKERHUB_NAMESPACE=ajeetraina777 TAG=latest bash scripts/push-kits.sh
 ```
+
+The workflow needs `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` repo secrets.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

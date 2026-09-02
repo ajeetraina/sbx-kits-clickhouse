@@ -4,14 +4,14 @@ Connects an agent's Docker Sandbox to a **remote ClickHouse** warehouse
 (ClickHouse Cloud or self-hosted) through the official
 [ClickHouse MCP server](https://github.com/ClickHouse/mcp-clickhouse). The agent
 gets structured tools to list databases/tables and run read queries against your
-real warehouse — inside an isolated microVM, under a `deny-all` network policy,
+real warehouse, inside an isolated microVM, under a `deny-all` network policy,
 with the password injected by the sbx proxy so it **never enters the container**.
 
 ## Why this is a good fit for sbx
 
 ClickHouse is most useful pointed at real data, and that's exactly where the
 sandbox model pays off: the agent can explore your warehouse while (a) it can
-only reach the one host you allow-list, and (b) it never sees the password — the
+only reach the one host you allow-list, and (b) it never sees the password,  the
 proxy holds it and injects it on the wire.
 
 ## How the credential stays out of the container
@@ -23,7 +23,7 @@ proxy holds it and injects it on the wire.
    sentinel for your real password on the outbound request.
 
 The ClickHouse **native** protocol (port 9000/9440) is raw TCP and cannot be
-injected this way — so this kit drives ClickHouse over the **HTTP interface**
+injected this way so this kit drives ClickHouse over the **HTTP interface**
 (8443 for Cloud, 8123 for plain HTTP).
 
 ## Configure

@@ -62,12 +62,16 @@ setup:
       user: "1000"
       description: "Install the official ClickHouse MCP server (clickhouse-connect over the HTTP interface)"
   startup:
-    # Register the MCP server with Claude Code if present. Guarded + `|| true`
-    # so it is a no-op on other agents and idempotent across restarts (a repeat
-    # `mcp add` simply fails and is swallowed).
-    - command: ["sh", "-c", "command -v claude >/dev/null 2>&1 && claude mcp add clickhouse -- /home/agent/.local/bin/mcp-clickhouse >/dev/null 2>&1 || true"]
+    # Register the MCP server with Claude Code if present. Must use --scope user
+    # (writes the GLOBAL mcpServers block) so the agent sees it from ANY
+    # workspace cwd — the default `local` scope is keyed by the registration
+    # cwd, which differs from the agent's workspace and stays invisible. HOME and
+    # PATH are pinned because the startup shell runs via su without them set.
+    # `mcp get || mcp add` keeps it idempotent across restarts; `|| true` and the
+    # `command -v claude` guard make it a no-op on non-Claude agents.
+    - command: ["sh", "-c", "export HOME=/home/agent PATH=/home/agent/.local/bin:$PATH; command -v claude >/dev/null 2>&1 || exit 0; claude mcp get clickhouse >/dev/null 2>&1 || claude mcp add --scope user clickhouse -- /home/agent/.local/bin/mcp-clickhouse >/dev/null 2>&1 || true"]
       user: "1000"
-      description: "Register the ClickHouse MCP server with the Claude agent (best-effort; no-op elsewhere)"
+      description: "Register the ClickHouse MCP server with the Claude agent at user scope (best-effort; no-op elsewhere)"
   files:
     # Portable server definition — copy into any agent that reads an mcpServers
     # block. Written under $HOME so it never overlays the user's repo.

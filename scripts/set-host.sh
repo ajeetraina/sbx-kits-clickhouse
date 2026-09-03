@@ -4,9 +4,9 @@ set -euo pipefail
 # set-host.sh — set the ClickHouse connection target in spec.yaml, keeping every
 # copy of a value in sync. In the v0.39.0 grammar there is no `args` templating,
 # so the host lives in THREE places (env var, credential inject domain, network
-# allow entry) and the user lives in TWO (env var, inject username). This script
-# is the single source of truth so those literals never drift — a drift the
-# validator won't catch but the engine rejects at run time.
+# allow entry). This script is the single source of truth so those literals
+# never drift — a drift the validator won't catch but the engine rejects at run
+# time.
 #
 # Usage:
 #   scripts/set-host.sh <host> [--user U] [--port P] [--database D] [--secure true|false]
@@ -16,7 +16,7 @@ set -euo pipefail
 #   scripts/set-host.sh ch.internal.example.com --user analyst --port 8123 --secure false
 #
 # The password is NOT handled here — it never belongs in the spec. Set it with:
-#   sbx secret set -g clickhouse
+#   sbx secret set clickhouse
 
 usage() {
   sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
@@ -58,7 +58,6 @@ H="$HOST" perl -pi -e 's{^(\s*- ")[^"]*("\s*#\s*runtime: the warehouse.*)$}{$1.$
 
 if [ -n "$USER_VAL" ]; then
   H="$USER_VAL" perl -pi -e 's{^(\s*CLICKHOUSE_USER:\s*")[^"]*(".*)$}{$1.$ENV{H}.$2}e' "$SPEC"
-  H="$USER_VAL" perl -pi -e 's{^(\s*username:\s*")[^"]*(".*)$}{$1.$ENV{H}.$2}e' "$SPEC"
 fi
 [ -z "$PORT" ]     || H="$PORT"     perl -pi -e 's{^(\s*CLICKHOUSE_PORT:\s*")[^"]*(".*)$}{$1.$ENV{H}.$2}e' "$SPEC"
 [ -z "$DATABASE" ] || H="$DATABASE" perl -pi -e 's{^(\s*CLICKHOUSE_DATABASE:\s*")[^"]*(".*)$}{$1.$ENV{H}.$2}e' "$SPEC"
@@ -71,7 +70,7 @@ if [ "$count" -ne 3 ]; then
 fi
 
 echo "Updated $SPEC:"
-grep -nE '^[[:space:]]*(CLICKHOUSE_(HOST|PORT|USER|DATABASE|SECURE):|- domain:|username:|- ".*# runtime: the warehouse)' "$SPEC" \
+grep -nE '^[[:space:]]*(CLICKHOUSE_(HOST|PORT|USER|DATABASE|SECURE):|- domain:|- ".*# runtime: the warehouse)' "$SPEC" \
   | sed 's/^/  /'
 
 # --- re-validate so a drifted/invalid spec never survives this script ------
@@ -85,4 +84,4 @@ fi
 
 echo
 echo "Next: store the password (never goes in the spec):"
-echo "  sbx secret set -g clickhouse"
+echo "  sbx secret set clickhouse"

@@ -1,11 +1,10 @@
 # ClickHouse mixin (remote connector)
 
 Connects an agent's Docker Sandbox to a **remote ClickHouse** warehouse
-(ClickHouse Cloud or self-hosted) through the official
-[ClickHouse MCP server](https://github.com/ClickHouse/mcp-clickhouse). The agent
-gets structured tools to list databases/tables and run read queries against your
-real warehouse — inside an isolated microVM, under a `deny-all` network policy,
-with the password injected by the sbx proxy so it **never enters the container**.
+(ClickHouse Cloud or self-hosted) over the **HTTP interface**. The agent queries
+your real warehouse with `curl` — inside an isolated microVM, under a `deny-all`
+network policy, with the password injected by the sbx proxy so it **never enters
+the container**.
 
 ![Architecture](assets/architecture.svg)
 
@@ -19,20 +18,28 @@ proxy holds it and injects it on the wire.
 ## How the credential stays out of the container
 
 1. `CLICKHOUSE_PASSWORD` is set to the sentinel `proxy-managed` inside the sandbox.
-2. `clickhouse-connect` (used by the MCP server) authenticates over the HTTP
-   interface with `Authorization: Basic base64(user:proxy-managed)`.
-3. The proxy recognizes the allow-listed host + `scheme: basic` and swaps the
-   sentinel for your real password on the outbound request.
+2. The agent calls the ClickHouse HTTP interface with two headers:
+   `X-ClickHouse-User: <user>` and `X-ClickHouse-Key: proxy-managed`.
+3. The proxy recognizes the allow-listed host and swaps the sentinel in the
+   `X-ClickHouse-Key` header for your real password on the outbound request.
 
 The ClickHouse **native** protocol (port 9000/9440) is raw TCP and cannot be
 injected this way — so this kit drives ClickHouse over the **HTTP interface**
 (8443 for Cloud, 8123 for plain HTTP).
 
+> **Why header auth, not HTTP Basic?** ClickHouse's HTTP interface also accepts
+> `Authorization: Basic base64(user:pass)`, but the sbx v0.39.0 proxy's
+> `scheme: basic` injection does not rewrite the base64-encoded Basic header — the
+> sentinel would leak through unswapped and auth would fail. The
+> `X-ClickHouse-User` / `X-ClickHouse-Key` headers carry the credential in plain
+> form, so the proxy's header sentinel-swap works cleanly. (This also means the
+> `clickhouse-connect`-based [MCP server](https://github.com/ClickHouse/mcp-clickhouse),
+> which authenticates via Basic auth, is **not** wired up by this kit.)
+
 ## Configure
 
 **1. Set the connection target** with the helper — it rewrites every place the
-value must match (the host lives in **3** spots, the user in **2**) and
-re-validates, so nothing can drift:
+host must match (it lives in **3** spots) and re-validates, so nothing can drift:
 
 ```bash
 scripts/set-host.sh <your-host>.clickhouse.cloud
@@ -59,21 +66,13 @@ These are all non-secret values (defaults shown); the helper edits them in
 **2. Set the password** (never stored in the kit):
 
 ```bash
-sbx secret set -g clickhouse        # prompts for the value; stored in your secret store
+sbx secret set clickhouse        # prompts for the value; stored in your secret store
 ```
 
-Or point sbx at where the password already lives, in
-`~/.config/sbx/credentials.yaml`:
-
-```yaml
-bindings:
-  clickhouse:
-    discovery:
-      - env: [CLICKHOUSE_PASSWORD]
-      # or: - file: { path: "~/.clickhouse/password.txt" }
-    allowedDomains:
-      - <your-host>.clickhouse.cloud   # must match CLICKHOUSE_HOST / inject domain
-```
+The first `sbx run` (or `sbx create`) prompts to authorize sending the
+`clickhouse` credential to your host and writes the binding into
+`~/.config/sbx/credentials.yaml` for you. Approve it once; the host must match
+`CLICKHOUSE_HOST` / the inject domain / the network allow entry.
 
 ## Usage
 
@@ -102,30 +101,40 @@ sbx kit validate .
 sbx kit inspect  .                             # confirm host resolved into inject + allow
 
 # End to end
-sbx run claude --kit . --name ch-probe .
-sbx exec ch-probe -- /home/agent/.local/bin/mcp-clickhouse --help   # server installed?
-sbx exec ch-probe -- claude mcp list                                # registered?
-# then ask the agent: "list the ClickHouse databases"
-sbx rm ch-probe
+sbx create claude --kit . --name ch-probe .
+
+# the password is injected into X-ClickHouse-Key; the container only holds the sentinel
+sbx exec ch-probe -- sh -c 'curl -sk \
+  -H "X-ClickHouse-User: $CLICKHOUSE_USER" -H "X-ClickHouse-Key: $CLICKHOUSE_PASSWORD" \
+  "https://$CLICKHOUSE_HOST:$CLICKHOUSE_PORT/?query=SELECT%201"'      # -> 1
+sbx exec ch-probe -- sh -c 'curl -sk \
+  -H "X-ClickHouse-User: $CLICKHOUSE_USER" -H "X-ClickHouse-Key: $CLICKHOUSE_PASSWORD" \
+  "https://$CLICKHOUSE_HOST:$CLICKHOUSE_PORT/?query=SHOW%20DATABASES"'  # -> your databases
+
+# then ask the agent: "run SELECT count() FROM system.tables against ClickHouse"
+sbx rm --force ch-probe
 ```
 
 ## Notes & limitations
 
 - **HTTP interface only.** No `clickhouse-client` (native protocol) — its auth
-  can't be proxy-injected. `curl` against the HTTP interface works too, since
-  Basic auth to the allow-listed host is injected.
-- **TLS verification.** `CLICKHOUSE_VERIFY` defaults to `false` because the
-  proxy terminates TLS inside the container with its own CA, which
-  `clickhouse-connect`'s bundled `certifi` store does not trust. The
-  proxy→warehouse hop is still TLS-verified, so the connection to ClickHouse
-  stays protected. To verify end to end instead, point `clickhouse-connect` at
-  the proxy CA and set `CLICKHOUSE_VERIFY: "true"`.
-- **Read-only.** `mcp-clickhouse` runs queries with `readonly=1` by default.
+  can't be proxy-injected. The agent queries via `curl` to the HTTP interface,
+  where the `X-ClickHouse-Key` header is injected by the proxy.
+- **No MCP server.** The `clickhouse-connect`-based
+  [`mcp-clickhouse`](https://github.com/ClickHouse/mcp-clickhouse) server
+  authenticates with HTTP Basic auth, which the sbx v0.39.0 proxy does not
+  inject correctly (the base64 Basic header isn't rewritten), so it is not wired
+  up. If a future sbx fixes `scheme: basic` injection, the MCP server can be
+  added back for structured tools.
+- **TLS.** Pass `curl -k`: the proxy terminates TLS inside the container with its
+  own CA. The proxy→warehouse hop is still TLS-verified, so the connection to
+  ClickHouse stays protected.
+- **Read-only.** Keep to `SELECT` / `SHOW` / `DESCRIBE`. For a hard guarantee,
+  use a read-only ClickHouse user or append `&readonly=1` to the query URL.
 - **Cloud port.** Confirm your proxy policy permits HTTPS CONNECT to `:8443`
   (not just `:443`). If queries hang, check that first.
-- **Claude-oriented.** The startup hook registers the MCP server via
-  `claude mcp add`; on non-Claude agents it's a no-op — copy
-  `~/.clickhouse/mcp.json` into that agent's MCP config instead.
+- **Agent-agnostic.** No agent-specific setup — any agent that can run `curl`
+  works (Claude, Codex, Gemini, …).
 
 ## Publishing
 

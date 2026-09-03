@@ -94,24 +94,87 @@ Local path (while authoring):
 sbx run claude --kit . .
 ```
 
-## Verify
+## Verify / test
+
+### 1. Static checks (no sandbox)
 
 ```bash
 sbx kit validate .
 sbx kit inspect  .                             # confirm host resolved into inject + allow
+```
 
-# End to end
+### 2. Configure the target (once, before the sandbox)
+
+```bash
+scripts/set-host.sh <your-host>.clickhouse.cloud   # rewrites the 3 host spots + re-validates
+sbx secret set clickhouse                          # store the password in your secret store
+```
+
+### 3. Bring the sandbox up
+
+```bash
 sbx create claude --kit . --name ch-probe .
+```
 
-# the password is injected into X-ClickHouse-Key; the container only holds the sentinel
+The first `create`/`run` prompts once to authorize sending the `clickhouse`
+credential to your host — approve it.
+
+### 4. Test the credential path (the real test)
+
+The container only holds the `proxy-managed` sentinel; the proxy swaps in the
+real password on the wire to your allow-listed host.
+
+```bash
+# sanity — should print 1
 sbx exec ch-probe -- sh -c 'curl -sk \
   -H "X-ClickHouse-User: $CLICKHOUSE_USER" -H "X-ClickHouse-Key: $CLICKHOUSE_PASSWORD" \
-  "https://$CLICKHOUSE_HOST:$CLICKHOUSE_PORT/?query=SELECT%201"'      # -> 1
+  "https://$CLICKHOUSE_HOST:$CLICKHOUSE_PORT/?query=SELECT%201"'
+
+# server version
 sbx exec ch-probe -- sh -c 'curl -sk \
   -H "X-ClickHouse-User: $CLICKHOUSE_USER" -H "X-ClickHouse-Key: $CLICKHOUSE_PASSWORD" \
-  "https://$CLICKHOUSE_HOST:$CLICKHOUSE_PORT/?query=SHOW%20DATABASES"'  # -> your databases
+  "https://$CLICKHOUSE_HOST:$CLICKHOUSE_PORT/?query=SELECT%20version()"'
 
-# then ask the agent: "run SELECT count() FROM system.tables against ClickHouse"
+# list databases
+sbx exec ch-probe -- sh -c 'curl -sk \
+  -H "X-ClickHouse-User: $CLICKHOUSE_USER" -H "X-ClickHouse-Key: $CLICKHOUSE_PASSWORD" \
+  "https://$CLICKHOUSE_HOST:$CLICKHOUSE_PORT/?query=SHOW%20DATABASES"'
+
+# a read query (POST the SQL; add FORMAT for shape)
+sbx exec ch-probe -- sh -c 'curl -sk \
+  -H "X-ClickHouse-User: $CLICKHOUSE_USER" -H "X-ClickHouse-Key: $CLICKHOUSE_PASSWORD" \
+  --data-binary "SELECT name, engine FROM system.tables LIMIT 5 FORMAT PrettyCompact" \
+  "https://$CLICKHOUSE_HOST:$CLICKHOUSE_PORT/"'
+
+# confirm the real password is NOT in the container
+sbx exec ch-probe -- printenv CLICKHOUSE_PASSWORD    # -> proxy-managed
+```
+
+### 5. Test through the agent (end-user experience)
+
+```bash
+sbx run --name ch-probe        # attach to Claude
+```
+
+Then ask the agent, e.g.:
+
+> run `SELECT count() FROM system.tables` against ClickHouse
+
+It queries the HTTP interface per the kit's instructions and returns the count.
+
+### Expected results
+
+| Test | Pass looks like |
+|------|-----------------|
+| `SELECT 1` | `1` |
+| `SELECT version()` | e.g. `26.2.1.558` |
+| `SHOW DATABASES` | `default`, `system`, `information_schema`, … |
+| `printenv CLICKHOUSE_PASSWORD` | `proxy-managed` (real password absent) |
+| Auth failure | `Code: 194 … Authentication failed` → re-check `sbx secret set clickhouse` |
+
+### Cleanup
+
+```bash
 sbx rm --force ch-probe
 ```
 
